@@ -32,4 +32,39 @@ Also fixed a real bug: B pointer advance must use stride_bk, not stride_bn.
 - torch (cuBLAS): 0.146 ms → 14.7 TFLOPS
 - Gap to close: 8%
 
-**Next:** block size sweep (16/32/64/128), then Nsight profiling.
+**experiment on block size sweep** (07/15) 
+**Question:** which tile config (BM×BN×BK) runs fastest on the T4, and why?
+
+**Method:** same naive kernel, swept all combos of BM/BN ∈ {32,64,128},
+BK ∈ {32,64} — 18 configs. Timed each with triton.testing.do_bench at
+1024³, fp16 inputs, fp32 accumulate.
+
+**Results:**
+BM  BN  BK     ms  TFLOPS
+ 32  64  32  0.755     2.8
+ 32  64  64  0.787     2.7
+ 64  32  64  0.946     2.3
+ 64  32  32  0.967     2.2
+ 64  64  32  1.477     1.5
+ 32 128  32  1.408     1.5
+128  32  32  1.728     1.2
+ 32  32  64  1.871     1.1
+ 32  32  32  2.067     1.0
+ 32 128  64 11.257     0.2
+ 64  64  64 10.670     0.2
+128  32  64 10.304     0.2
+ 64 128  64 20.833     0.1
+ 64 128  32 21.802     0.1
+128  64  32 22.054     0.1
+128  64  64 20.286     0.1
+128 128  32 35.347     0.1
+128 128  64 34.990     0.1
+
+**Finding 1 — free 2.3x:** winner is 32×64×32 at 2.8 TFLOPS (~19% of
+cuBLAS, up from 8%). Our original hand-picked 64/64/32 ranked 5th.
+
+**Chunk math (winning config, 1024³):** each worker does K/BK = 32 laps.
+Per lap: one 32×32 chunk of A (1024 elems) + one 32×64 chunk of B
+(2048 elems). Total ~98K elements loaded to produce a 32×64 = 2K patch:
+~48 loads per output element. Shrinking that ratio is what tiling and
+reuse are for.
