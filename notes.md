@@ -158,4 +158,6 @@ remaining 4x and test the Day-2 coalescing hypothesis.
 **New baseline: 3.7 TFLOPS** — 32/64/32, num_warps=4, num_stages=2.
 ~25% of cuBLAS (14.7).
 
+matmul arc paused at 3.7 TFLOPS; grouped ordering + Nsight parked, may revisit via attention profiling
+
 
