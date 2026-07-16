@@ -93,3 +93,54 @@ reuse are for.
 
 **Next:** pipelining (overlap loads with compute) + shared-memory reuse.
 Target: meaningful step toward cuBLAS's 14.7.
+
+## 2026/07/16 Day 2- experiment w/ pipelining and shared memory usage 
+
+**tested pipelining with num_stages and num_warps** 
+**Method:** swept num_warps ∈ {2,4,8} × num_stages ∈ {1..5}, same kernel,
+same 1024³ fp16 problem, do_bench timing. One variable group at a time:
+stages=1 is the no-pipelining control.
+
+ warps  stages    ms  TFLOPS
+     4       2 0.583     3.7
+     4       4 0.582     3.7
+     4       1 0.589     3.6
+     4       3 0.599     3.6
+     4       5 0.592     3.6
+     8       2 0.725     3.0
+     8       5 0.724     3.0
+     8       3 0.732     2.9
+     8       1 0.729     2.9
+     8       4 0.732     2.9
+     2       4 1.678     1.3
+     2       1 1.678     1.3
+     2       5 1.683     1.3
+     2       2 1.681     1.3
+     2       3 1.679     1.3
+
+**Findings** 
+**Finding 0 — caught a harness bug:** warps=4/stages=1 should reproduce
+Day 2's baseline (2.8) but measured 3.6. Cause: Day 2's matmul() allocated
+the output tensor inside the timed region; today's harness allocates once
+outside the loop. We were timing allocation overhead. Lesson: benchmarks
+compare harnesses, not just kernels — only compare numbers measured
+identically. True kernel baseline was 3.6 all along; Day 2's relative
+ranking still stands (same harness within that sweep)
+
+**Finding A- pipelining bought nothing due to hardware limitations**
+stages 1→5 at warps=4 are flat (3.6–3.7). The T4 is Turing (2018);
+async memory copies (cp.async), which let multi-stage pipelining truly
+overlap loads with compute, arrived in Ampere. On Turing extra stages
+mostly burn shared memory for no gain. A missing hardware feature,
+visible as a flat line in a benchmark.
+
+**Finding B — warps matter (3x spread):** 4 warps = 3.7, 8 = 3.0,
+2 = 1.3. Two warps (64 threads) can't generate enough parallelism to
+hide memory latency for a 32×64 tile; eight warps oversubscribe it —
+too little work per warp. perfect spot depends on tile size (knobs
+interact). 
+
+**New baseline: 3.7 TFLOPS** — 32/64/32, num_warps=4, num_stages=2.
+~25% of cuBLAS (14.7).
+
+
